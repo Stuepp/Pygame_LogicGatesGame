@@ -1,122 +1,201 @@
-import pygame
+import pygame, sys, os
 from typing import List, Tuple
 from ui import draw_text
+
+WIDTH, HEIGHT = 800, 600
 
 white = (255, 255, 255)
 green = (34, 139, 34)
 wire_color_false = (100, 100, 100)
+button_hover = (50, 200, 50)
+button_bg = (40, 40, 40)
+panel_bg = (50, 50, 50)
 
 pygame.font.init()
 gate_font = pygame.font.SysFont('arial', 20)
+quantity_font = pygame.font.SysFont('arial', 14)
 expected_font = pygame.font.SysFont('arial', 10)
 
-default_gates = {"AND": ["images//AND.png", [[-20, -10], [-20, 10]], [20, 0, 0]],
-                 "OR": ["images//OR.png", [[-20, -10], [-20, 10]], [20, 0, 0]],
-                 "NOT": ["images//NOT.png", [[-20, 0]], [17, 0, 1]],
-                 "XOR": ["images//XOR.png", [[-20, -10], [-20, 10]], [20, 0, 0]],
-                 "XNOR": ["images//XNOR.png", [[-20, -10], [-20, 10]], [20, 0, 1]],
-                 "NAND": ["images//NAND.png", [[-20, -10], [-20, 10]], [20, 0, 1]],
-                 "NOR": ["images//NOR.png", [[-20, -10], [-20, 10]], [20, 0, 1]]}
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS  # PyInstaller creates this temp folder
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
+default_gates = {"AND": [resource_path("images//AND.png"), [[-20, -10], [-20, 10]], [20, 0, 0]],
+                 "OR": [resource_path("images//OR.png"), [[-20, -10], [-20, 10]], [20, 0, 0]],
+                 "NOT": [resource_path("images//NOT.png"), [[-20, 0]], [17, 0, 1]],
+                 "XOR": [resource_path("images//XOR.png"), [[-20, -10], [-20, 10]], [20, 0, 0]],
+                 "XNOR": [resource_path("images//XNOR.png"), [[-20, -10], [-20, 10]], [20, 0, 1]],
+                 "NAND": [resource_path("images//NAND.png"), [[-20, -10], [-20, 10]], [20, 0, 1]],
+                 "NOR": [resource_path("images//NOR.png"), [[-20, -10], [-20, 10]], [20, 0, 1]]}
+
+_image_cache = {}
+
+def load_gate_image(gate_type: str):
+    if gate_type in _image_cache:
+        return _image_cache[gate_type]
+    
+    if gate_type in default_gates:
+        image_path = default_gates[gate_type][0]
+        image = pygame.image.load(image_path).convert_alpha()
+        image = pygame.transform.scale(image, (60, 60))
+        _image_cache[gate_type] = image
+        return image
+    
+    raise ValueError(f"Gate type '{gate_type}' not found.")
+
+
+class Terminal:
+    def __init__(self, i: int, type_: str, value: bool=False, isNot: bool=False):
+        self.i: int = i
+        self.type: str = type_
+        self.pos: Tuple[int, int] = self.calculate_position()
+        self.value: bool = value
+        self.isNot: bool = isNot
+
+    def calculate_position(self):
+        pos = (0, 0)
+        if self.type == "TERMINAL_I":
+            pos = (WIDTH // 8, HEIGHT // 6 + self.i * HEIGHT // 10 + 3)
+        elif self.type == "TERMINAL_O":
+            pos = (WIDTH - WIDTH // 8, HEIGHT // 6 + self.i * HEIGHT // 10 + 3)
+        return pos
+
+    def __str__(self):
+        return f"Terminal(i={self.i}, type={self.type}, pos={self.pos}, value={self.value}, isNot={self.isNot})"
 
 class Gate:
-    def __init__(self, gate_type: str, inputs: List[bool], outputs: List[bool], position: Tuple[int,int], color: Tuple[int,int,int]):
+    def __init__(self, gate_type: str, inputs: int, outputs: int, position: Tuple[int,int], function=None):
         self.id = None
         self.type = gate_type.upper()
-        self.inputs = inputs
-        self.outputs = outputs
+        self.inputs = [Terminal(i, "GATE_I", False) for i in range(inputs)]
+        self.outputs = [Terminal(i, "GATE_O", False) for i in range(outputs)]
         self.position = position
-        self.color = color
         self.radius = 30
+        self.function = function
+
+        if self.type in ["NOT", "NAND", "NOR", "XNOR"]:
+            self.outputs[0].isNot = True
     
     def copy(self):
-        return Gate(gate_type=self.type, inputs=self.inputs[:], outputs=self.outputs, position=self.position, color=self.color)
+        return Gate(gate_type=self.type, inputs=len(self.inputs), outputs=len(self.outputs), position=self.position, function=self.function)
 
-    def draw(self, screen, hover_color, x=-1, y=-1, selected=False):
+    def draw(self, screen, x=-1, y=-1, selected=False):
         if x == -1 and y == -1:
             x, y = self.position
+            
         if self.type in default_gates.keys():
-            image = pygame.image.load(default_gates[self.type][0])
-            image = pygame.transform.scale(image, (self.radius * 2, self.radius * 2))
+            image = load_gate_image(self.type)
             screen.blit(image, (x - self.radius, y - self.radius))
         else:
             rect_width, rect_height = 80, 60
             rect = pygame.Rect(self.position[0] - rect_width // 2, self.position[1] - rect_height // 2, rect_width, rect_height)
-            pygame.draw.rect(screen, hover_color if selected else self.color, rect, border_radius=10)
+            pygame.draw.rect(screen, button_hover if selected else button_bg, rect, border_radius=10)
             pygame.draw.rect(screen, white, rect, 2, border_radius=10)
-            draw_text(screen, self.type, (self.position[0] - self.font.size(self.type)[0] // 2, self.position[1] - self.font.size(self.type)[1] // 2), self.font)
+
+            type_len = len(self.type)
+            if type_len <= 3:
+                font = pygame.font.SysFont('arial', 20)
+            elif type_len <= 4:
+                font = pygame.font.SysFont('arial', 18)
+            elif type_len <= 8:
+                font = pygame.font.SysFont('arial', 14)
+            else:
+                font = pygame.font.SysFont('arial', 10)
+            draw_text(screen, self.type, (self.position[0] - font.size(self.type)[0] // 2, self.position[1] - font.size(self.type)[1] // 2), font)
             
         # Draw input terminals
         input_positions = self.get_input_positions()
         for i, pos in input_positions:
-            color = green if self.inputs[i] else self.color
+            color = green if self.inputs[i].value else button_bg
             pygame.draw.rect(screen, white, (pos[0] - 6, pos[1] - 6, 12, 12))
             pygame.draw.rect(screen, color, (pos[0] - 4, pos[1] - 4, 8, 8))
 
         # Draw output terminals
         output_positions = self.get_output_positions()
         for i, pos, circle_not in output_positions:
-            color = green if self.outputs[i] else self.color
+            color = green if self.outputs[i].value else button_bg
             if circle_not:
                 pygame.draw.circle(screen, white, pos, 6)
                 pygame.draw.circle(screen, color, pos, 4)
             else:
                 pygame.draw.rect(screen, white, (pos[0] - 6, pos[1] - 6, 12, 12))
                 pygame.draw.rect(screen, color, (pos[0] - 4, pos[1] - 4, 8, 8))
-    
+
     def update(self):
-        self.evaluate()
+        self.evaluate()        
+
+    def udpate_terminal_positions(self):
+        for term in self.inputs:
+            if self.type in default_gates.keys():
+                term.pos = (self.position[0] + default_gates[self.type][1][term.i][0], self.position[1] + default_gates[self.type][1][term.i][1])
+            else: 
+                # Caso hajam gates personalizados
+                break
+        for term in self.outputs:
+            if self.type in default_gates.keys():
+                pos = (default_gates[self.type][2][0], default_gates[self.type][2][1])
+                pos = (self.position[0] + pos[0], self.position[1] + pos[1])
+                term.pos = pos
+            else:
+                # Caso hajam gates personalizados
+                break
 
     def get_input_positions(self):
         positions = []
         if self.type in default_gates.keys():
-            for i, pos in enumerate(default_gates[self.type][1]):
-                positions.append((i, (self.position[0] + pos[0], self.position[1] + pos[1])))
+            for term in self.inputs:
+                positions.append((term.i, term.pos))
         else:
             rect_width, rect_height = 80, 60
             for i in range(len(self.inputs)):
                 x_off = -rect_width // 2
                 y_off = -rect_height // 2 + (i + 1) * (rect_height // (len(self.inputs) + 1))
                 pos = (self.position[0] + x_off, self.position[1] + y_off)
+                self.inputs[i].pos = pos
                 positions.append((i, pos))
         return positions
 
     def get_output_positions(self):
         positions = []
         if self.type in default_gates.keys():
-            circle_not = 0
-            if self.type in ["NOT", "NAND", "NOR", "XNOR"]:
-                circle_not = 1
-            pos = (default_gates[self.type][2][0], default_gates[self.type][2][1])
-            pos = (self.position[0] + pos[0], self.position[1] + pos[1])
-            positions.append((0, pos, circle_not))
+            term = self.outputs[0]
+            positions.append((term.i, term.pos, term.isNot))
         else:
             rect_width, rect_height = 80, 60
             for i in range(len(self.outputs)):
                 x_offset = rect_width // 2
                 y_offset = -rect_height // 2 + (i + 1) * (rect_height // (len(self.outputs) + 1))
                 pos = (self.position[0] + x_offset, self.position[1] + y_offset)
+                self.outputs[i].pos = pos
                 positions.append((i, pos, 0))
         return positions
     
     def evaluate(self):
         match self.type:
             case "AND":
-                self.outputs = [all(self.inputs)]
+                self.outputs[0].value = all([term.value for term in self.inputs])
             case "OR":
-                self.outputs = [any(self.inputs)]
+                self.outputs[0].value = any([term.value for term in self.inputs])
             case "NOT":
-                if len(self.inputs) == 1:
-                    self.outputs = [not self.inputs[0]]
+                self.outputs[0].value = not self.inputs[0].value
             case "NAND":
-                self.outputs = [not all(self.inputs)]
+                self.outputs[0].value = not all([term.value for term in self.inputs])
             case "NOR":
-                self.outputs = [not any(self.inputs)]
+                self.outputs[0].value = not any([term.value for term in self.inputs])
             case "XOR":
-                self.outputs = [self.inputs[0] != self.inputs[1]] if len(self.inputs) == 2 else [False]
+                self.outputs[0].value = self.inputs[0].value != self.inputs[1].value if len(self.inputs) == 2 else False
             case "XNOR":
-                self.outputs = [self.inputs[0] == self.inputs[1]] if len(self.inputs) == 2 else [False]
+                self.outputs[0].value = self.inputs[0].value == self.inputs[1].value if len(self.inputs) == 2 else False
             case _:
-                raise ValueError(f"Unsupported gate type: {self.type}")
+                if self.function:
+                    input_values = [term.value for term in self.inputs]
+                    for i, val in enumerate(self.function(input_values)):
+                        self.outputs[i].value = val
+                else:
+                    raise ValueError(f"Unsupported gate type: {self.type}")
     
     def __str__(self):
         return (f"Gate(type={self.type}, inputs={self.inputs}, outputs={self.outputs}, "
@@ -150,76 +229,248 @@ class Wire:
         value = self.to_i if isTo else self.from_i
         if value[1] == "GATE_I":
             gate = ports["GATE"][value[0]]
-            pos = gate.get_input_positions()[value[2]][1]
+            pos = gate.inputs[value[2]].pos
         elif value[1] == "GATE_O":
             gate = ports["GATE"][value[0]]
-            pos = gate.get_output_positions()[value[2]][1]
+            pos = gate.outputs[value[2]].pos
         else:
-            pos = ports[value[1]][value[0]][1]
+            pos = ports[value[1]][value[0]].pos
         return pos
     
     def update_own_value(self, ports):
         if self.from_i[1] == "GATE_O":
             gate = ports["GATE"][self.from_i[0]]
-            self.value = gate.outputs[self.from_i[2]]
-        elif self.from_i[1] == "TERMINAL_O":
-            term = ports["TERMINAL_O"][self.from_i[0]]
-            self.value = term[2]
+            self.value = gate.outputs[self.from_i[2]].value
+        elif self.from_i[1] == "TERMINAL_I":
+            term = ports["TERMINAL_I"][self.from_i[0]]
+            self.value = term.value
 
     def set_value_to_out(self, ports):
         if self.to_i[1] == "GATE_I":
             gate = ports["GATE"][self.to_i[0]]
-            gate.inputs[self.to_i[2]] = self.value
-        elif self.from_i[1] == "TERMINAL_I":
-            pass # Alterar o valor do terminal da esquerda
+            gate.inputs[self.to_i[2]].value = self.value
+        elif self.to_i[1] == "TERMINAL_O":
+            term = ports["TERMINAL_O"][self.to_i[0]]
+            term.value = self.value
 
     def __str__(self):
         return f"Wire(from={self.from_i}, to={self.to_i}, value={self.value})"
 
 
 class Level:
-    def __init__(self, name: str, inputs: List[bool], allowed_gates: List[str], function=None):
+    def __init__(self, name: str, inputs: int, allowed_gates: dict[str, int], function=None, instructions: str = "", isSim: bool = False):
         self.name = name
-        self.inputs = inputs.copy()
-        self.expected = function(inputs)
-        self.current_output = [False] * len(self.expected)
+        self.inputs = [Terminal(i, "TERMINAL_I", False) for i in range(inputs)]
+        if isSim:
+            self.expected = [False] * len(self.inputs)
+        else:
+            self.expected = function([term.value for term in self.inputs])
+        self.outputs = [Terminal(i, "TERMINAL_O") for i in range(len(self.expected))]
         self.allowed_gates = allowed_gates.copy()
         self.gates: dict[int, Gate] = {}
         self.wires: List[Wire] = []
         self.current_wire: Wire = None
         self.function = function
-    
-    def add_gate(self, gate, id_gate):
-        gate.id = id_gate
-        self.gates[id_gate] = gate
+        self.palette = []
+        self.current_function = None
+        self.completed = False
+        self.instructions = instructions
+        self.isSimulator = isSim
+
+    def reset(self):
+        temp_gates = list(self.gates.values())
+        for gate in temp_gates:
+            self.remove_gate(gate)
+            self.allowed_gates[gate.type] += 1
+        self.wires.clear()
+        for term in self.outputs:
+            term.value = False
+        self.current_wire = None
+        self.current_function = None
+
+    def add_gate(self, gate):
+        id = max(self.gates.keys()) + 1 if len(self.gates) > 0 else 0
+        gate.id = id
+        self.gates[id] = gate
 
     def remove_gate(self, gate):
         idx_gate = gate.id
-        self.wires = [wire for wire in self.wires if not (
+
+        wires = [wire for wire in self.wires if (
             (wire.from_i[1] == "GATE_O" and wire.from_i[0] == idx_gate) or
             (wire.to_i[1] == "GATE_I" and wire.to_i[0] == idx_gate)
         )]
+        
+        for wire in wires:
+            if wire.to_i[1] == "GATE_I":
+                gate = self.gates[wire.to_i[0]]
+                gate.inputs[wire.to_i[2]].value = False
+            elif wire.to_i[1] == "TERMINAL_O":
+                term = self.outputs[wire.to_i[0]]
+                term.value = False
+            self.wires.remove(wire)
+        
         self.gates.pop(idx_gate)
 
-    def draw(self, screen, width, height, button_bg, button_hover, mouse_pos):
-        input_positions = self.get_input_terminals()
-        for i, val in enumerate(self.inputs):
-            color = green if val else button_bg
-            pygame.draw.circle(screen, white, input_positions[i][1], 12)
-            pygame.draw.circle(screen, color, input_positions[i][1], 10)
-            draw_text(screen, f"{val}", (30, input_positions[i][1][1] - 13), gate_font)
-        output_positions = self.get_output_terminals(width)
-        for i, val in enumerate(self.current_output):
-            color = green if val else button_bg
-            pygame.draw.circle(screen, white, output_positions[i][1], 12)
-            pygame.draw.circle(screen, color, output_positions[i][1], 10)
-            draw_text(screen, f"{val}", (output_positions[i][1][0] + 20, output_positions[i][1][1] - 13), gate_font)
-            draw_text(screen, f"Expected: {self.expected[i]}", (output_positions[i][1][0] + 20, output_positions[i][1][1] + 5), expected_font)
+    def draw_palette(self, screen, width, height):
+        panel_height = int(height * 0.16)
+        panel_y = height - panel_height
+
+        if not self.palette or len(self.palette) != len(self.allowed_gates):
+            self.palette = [(gt, (width // 8 + i * width // 8, panel_y + panel_height // 2)) for i, gt in enumerate(self.allowed_gates.keys())]
+
+        pygame.draw.rect(screen, (30, 30, 30), (0, panel_y - 5, width, panel_height + 5))
+        pygame.draw.rect(screen, panel_bg, (0, panel_y, width, panel_height), border_radius=15)
+        pygame.draw.rect(screen, white, (0, panel_y, width, panel_height), 2, border_radius=15)
+
+        font_cache = {}
+        for gt, pos in self.palette:
+            value = self.allowed_gates.get(gt, -1)
+
+            rect_width, rect_height = width * 0.1, height * 0.1
+            rect = pygame.Rect(pos[0] - rect_width // 2, pos[1] - rect_height // 2, rect_width, rect_height)
+            highlight_rect = pygame.Rect(rect.x, rect.y, rect.width, 12)
+            pygame.draw.rect(screen, (60, 60, 60), highlight_rect, border_radius=8)
+            pygame.draw.rect(screen, button_bg, rect, border_radius=10)
+
+            border_color = (255, 0, 0) if value == 0 else white
+            pygame.draw.rect(screen, border_color, rect, 2, border_radius=10)
+
+            type_len = len(gt)
+            if type_len not in font_cache:
+                if type_len <= 3:
+                    font_cache[type_len] = gate_font
+                elif type_len <= 4:
+                    font_cache[type_len] = pygame.font.SysFont('arial', 18)
+                elif type_len <= 8:
+                    font_cache[type_len] = pygame.font.SysFont('arial', 14)
+                else:
+                    font_cache[type_len] = pygame.font.SysFont('arial', 10)
+            font = font_cache[type_len]
+            draw_text(screen, gt, (pos[0] - font.size(gt)[0] // 2, pos[1] - font.size(gt)[1] // 2), font,)
+
+            if value > 0:
+                num_text = str(value)
+                num_pos = (rect.right - quantity_font.size(num_text)[0] - 6, rect.bottom - quantity_font.size(num_text)[1] - 4)
+                draw_text(screen, num_text, num_pos, quantity_font)
+
+    def draw_truth_table(self, screen, width, height):
+        if not self.inputs or not self.expected:
+            return
+
+        n_inputs = len(self.inputs)
+        n_outputs = len(self.outputs)
+        table_width = 60 * (n_inputs + n_outputs)
+        table_height = 30 * (2 ** n_inputs + 1)
+        center_x = width // 2
+        center_y = height // 2
+
+        start_x = center_x - table_width // 2
+        start_y = center_y - table_height // 2
+
+        # Draw gray background
+        bg_rect = pygame.Rect(start_x, start_y, table_width, table_height)
+        pygame.draw.rect(screen, (60, 60, 60), bg_rect, border_radius=10)
+
+        # Draw header
+        header_font = pygame.font.SysFont('arial', 16)
+        cell_w = 60
+        cell_h = 30
+
+        for i in range(n_inputs):
+            draw_text(screen, f"In {i+1}", (start_x + i * cell_w + 10, start_y + 5), header_font)
+        for i in range(n_outputs):
+            draw_text(screen, f"Out {i+1}", (start_x + (n_inputs + i) * cell_w + 10, start_y + 5), header_font)
+
+        # Rows
+        row_font = pygame.font.SysFont('arial', 14)
+        for row in range(2 ** n_inputs):
+            y = start_y + (row + 1) * cell_h
+            # Input
+            bits = [(row >> (n_inputs - 1 - i)) & 1 for i in range(n_inputs)]
+            for i, bit in enumerate(bits):
+                draw_text(screen, str(bit), (start_x + i * cell_w + 25, y + 7), row_font)
+            # Output
+            expected = self.function([bool(b) for b in bits])
+            for i, val in enumerate(expected):
+                draw_text(screen, str(int(val)), (start_x + (n_inputs + i) * cell_w + 25, y + 7), row_font)
+
+        # Grid
+        for i in range(n_inputs + n_outputs + 1):
+            x = start_x + i * cell_w
+            pygame.draw.line(screen, white, (x, start_y), (x, start_y + table_height), 1)
+        for i in range(2 ** n_inputs + 2):
+            y = start_y + i * cell_h
+            pygame.draw.line(screen, white, (start_x, y), (start_x + table_width, y), 1)
+
+    def draw_instructions(self, screen, width, height):
+        if not self.instructions:
+            return
+
+        font = pygame.font.SysFont("Arial", 20)
+        max_width = int(width * 0.8)
+        words = self.instructions.split()
+        lines = []
+        current_line = ""
+        for word in words:
+            test_line = current_line + (" " if current_line else "") + word
+            if font.size(test_line)[0] <= max_width:
+                current_line = test_line
+            else:
+                lines.append(current_line)
+                current_line = word
+        if current_line:
+            lines.append(current_line)
+
+        line_height = font.get_linesize()
+        total_height = line_height * len(lines)
+        text_surfaces = [font.render(line, True, (255, 255, 255)) for line in lines]
+        text_width = max(surf.get_width() for surf in text_surfaces)
+        text_height = total_height
+
+        center_x = width // 2
+        center_y = int(height * 0.75)
+        text_rect = pygame.Rect(0, 0, text_width, text_height)
+        text_rect.center = (center_x, center_y)
+
+        bg_surface = pygame.Surface(text_rect.size, pygame.SRCALPHA)
+        bg_surface.fill((0, 0, 0, 160))
+        screen.blit(bg_surface, text_rect.topleft)
+
+        border_rect = text_rect.inflate(8, 8)
+        pygame.draw.rect(screen, (255, 255, 255), border_rect, 2, border_radius=8)
+
+        for i, surf in enumerate(text_surfaces):
+            line_pos = (text_rect.left, text_rect.top + i * line_height)
+            screen.blit(surf, line_pos)
+
+    def draw(self, screen, width, height, mouse_pos):
+        if self.isSimulator:
+            self.expected = [False] * len(self.inputs)
+        else:
+            self.expected = self.function([term.value for term in self.inputs])
+
+        self.draw_palette(screen, width, height)
+
+        self.draw_instructions(screen, width, height)
+
+        for term in self.inputs:
+            color = green if term.value else button_bg
+            pygame.draw.circle(screen, white, term.pos, 12)
+            pygame.draw.circle(screen, color, term.pos, 10)
+            draw_text(screen, f"{term.value}", (30, term.pos[1] - 13), gate_font)
+        for term in self.outputs:
+            color = green if term.value else button_bg
+            pygame.draw.circle(screen, white, term.pos, 12)
+            pygame.draw.circle(screen, color, term.pos, 10)
+            draw_text(screen, f"{term.value}", (term.pos[0] + 20, term.pos[1] - 13), gate_font)
+            if not self.isSimulator:
+                draw_text(screen, f"Esperado: {self.expected[term.i]}", (term.pos[0] + 20, term.pos[1] + 5), expected_font)
         for gate in self.gates.values():
             gate.update()
-            gate.draw(screen, button_hover)
+            gate.draw(screen)
         
-        ports = {"TERMINAL_O": input_positions, "TERMINAL_I": output_positions, "GATE": self.gates}
+        ports = {"TERMINAL_I": self.inputs, "TERMINAL_O": self.outputs, "GATE": self.gates}
         for wire in self.wires:
             wire.update(ports)
             wire.draw(screen, ports)
@@ -227,25 +478,10 @@ class Level:
         if self.current_wire:
             self.current_wire.draw_one_point(screen, ports, mouse_pos)
         
-        # Update the current output and expected output
-
-    def get_input_terminals(self):
-        positions = []
-        for i in range(len(self.inputs)):
-            pos = (100, 100 + i * 60 + 3)
-            positions.append((i, pos, self.inputs[i]))
-        return positions
-
-    def get_output_terminals(self, width):
-        positions = []
-        for i in range(len(self.current_output)):
-            pos = (width - 100, 100 + i * 60 + 3)
-            positions.append((i, pos, self.inputs[i]))
-        return positions
 
     def terminal_has_two_wires(self, i):
         for wire in self.wires:
-            if wire.to_i[1] == "TERMINAL_I" and wire.to_i[0] == i:
+            if wire.to_i[1] == "TERMINAL_O" and wire.to_i[0] == i:
                 return True
         return False
 
@@ -255,3 +491,111 @@ class Level:
                 if wire.to_i[2] == i:
                     return True
         return False
+    
+    def cycle_inputs(self, forward=True):
+        n = len(self.inputs)
+        if n == 0:
+            return
+        current = 0
+        for i, term in enumerate(self.inputs):
+            if term.value:
+                current |= (1 << (n - i - 1))
+        if forward:
+            next_val = (current + 1) % (2 ** n)
+        else:
+            next_val = (current - 1) % (2 ** n)
+        for i in range(n):
+            self.inputs[i].value = bool((next_val >> (n - i - 1)) & 1)
+    
+    def evaluate(self):
+        if self.current_function is None:
+            return False
+        n = len(self.inputs)
+        for i in range(2 ** n):
+            x = [(i >> bit) & 1 == 1 for bit in range(n)]
+            expected = self.function(x)
+            actual = self.current_function(x)
+            if expected != actual:
+                return False
+        return True
+
+    def compile(self):
+        var_map = {}
+        expr_map = {}
+        custom_gate_funcs = {}
+
+        for i in range(len(self.inputs)):
+            var_map[("TERMINAL_I", i)] = f"x[{i}]"
+
+        for gid in self.gates:
+            var_map[("GATE_O", gid, 0)] = f"g{gid}"
+
+        for i in range(len(self.outputs)):
+            var_map[("TERMINAL_O", i)] = f"y{i}"
+
+        input_sources = {}
+        for wire in self.wires:
+            if wire.to_i[1] == "GATE_I":
+                input_sources[(wire.to_i[0], wire.to_i[2])] = wire.from_i
+            elif wire.to_i[1] == "TERMINAL_O":
+                input_sources[("OUT", wire.to_i[0])] = wire.from_i
+
+        def build_expr_for_gate(gid, output_idx=0):
+            gate = self.gates[gid]
+            input_exprs = []
+            for i in range(len(gate.inputs)):
+                src = input_sources.get((gid, i))
+                if src is None:
+                    input_exprs.append("False")
+                elif src[1] == "TERMINAL_I":
+                    input_exprs.append(var_map[(src[1], src[0])])
+                elif src[1] == "GATE_O":
+                    input_exprs.append(build_expr_for_gate(src[0], src[2] if len(self.gates[src[0]].outputs) > 1 else 0))
+                else:
+                    input_exprs.append("False")
+            t = gate.type
+            if t == "AND":
+                expr = f"({' and '.join(input_exprs)})"
+            elif t == "OR":
+                expr = f"({' or '.join(input_exprs)})"
+            elif t == "NOT":
+                expr = f"(not {input_exprs[0]})"
+            elif t == "NAND":
+                expr = f"(not ({' and '.join(input_exprs)}))"
+            elif t == "NOR":
+                expr = f"(not ({' or '.join(input_exprs)}))"
+            elif t == "XOR":
+                expr = f"({input_exprs[0]} != {input_exprs[1]})"
+            elif t == "XNOR":
+                expr = f"({input_exprs[0]} == {input_exprs[1]})"
+            else:
+                func_name = f"custom_func_{gid}"
+                custom_gate_funcs[func_name] = gate.function
+                inputs_str = ", ".join(input_exprs)
+                expr = f"{func_name}([{inputs_str}])[{output_idx}]"
+            expr_map[(gid, output_idx)] = expr
+            return expr
+
+        output_exprs = []
+        for i in range(len(self.outputs)):
+            src = input_sources.get(("OUT", i))
+            if src is None:
+                output_exprs.append("False")
+            elif src[1] == "TERMINAL_I":
+                output_exprs.append(var_map[(src[1], src[0])])
+            elif src[1] == "GATE_O":
+                output_exprs.append(build_expr_for_gate(src[0], src[2] if len(self.gates[src[0]].outputs) > 1 else 0))
+            else:
+                output_exprs.append("False")
+
+        body = f"return [{', '.join(output_exprs)}]"
+        func_lines = ["def logic_func(x):"]
+        for func_name in custom_gate_funcs:
+            func_lines.append(f"    {func_name} = __custom_funcs__['{func_name}']")
+        func_lines.append(f"    {body}")
+
+        func_str = "\n".join(func_lines)
+        local_ns = {}
+        global_ns = {"__custom_funcs__": custom_gate_funcs}
+        exec(func_str, global_ns, local_ns)
+        self.current_function = local_ns["logic_func"]
